@@ -35,7 +35,7 @@ def home():
 
     route_coords_json = json.dumps(route_coords)
 
-    return render_template('apphtml.html', route_coords=route_coords_json)
+    return render_template('index.html', route_coords=route_coords_json)
 
 @appmap.route('/places')
 def get_places():
