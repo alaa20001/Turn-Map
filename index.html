@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>خريطة طرابلس - إشارات التفاف</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <style>
+        #map {
+            height: 600px;
+            width: 100%;
+        }
+        .controls {
+            margin-top: 10px;
+            text-align: center;
+        }
+        .messages {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+            z-index: 1000;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="messages" id="turnMessages"></div>
+    <h1>خريطة طرابلس، ليبيا</h1>
+    <div id="map"></div>
+    <div class="controls">
+        <button onclick="moveForward()">تحرك للأمام</button>
+        <button onclick="moveBackward()">تحرك للخلف</button>
+        <button onclick="startTracking()">ابدأ تتبع الموقع</button>
+    </div>
+
+    <script>
+        // إعداد الخريطة
+        var map = L.map('map').setView([32.8872, 13.1913], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        // تحميل الإحداثيات من Flask
+        var routeCoords = JSON.parse('{{ route_coords | safe }}'); 
+        var route = L.polyline(routeCoords, {color: 'red'}).addTo(map);
+        var marker = L.marker(routeCoords[0]).addTo(map);
+        var index = 0;
+
+        var arduinoIp = "http://192.168.1.16"; // استبدل بعنوان IP الخاص بـ Arduino
+
+        function moveForward() {
+            if (index < routeCoords.length - 1) {
+                index++;
+                marker.setLatLng(routeCoords[index]);
+                map.panTo(routeCoords[index]);
+                checkTurn();
+            } else {
+                displayMessage('وصلت إلى وجهتك!');
+            }
+        }
+
+        function moveBackward() {
+            if (index > 0) {
+                index--;
+                marker.setLatLng(routeCoords[index]);
+                map.panTo(routeCoords[index]);
+                clearMessages();
+            }
+        }
+
+        function checkTurn() {
+            if (index > 0 && index < routeCoords.length - 1) {
+                var currentCoord = routeCoords[index];
+                var nextCoord = routeCoords[index + 1];
+                var prevCoord = routeCoords[index - 1];
+
+                // حساب الزوايا
+                var angleToNext = Math.atan2(nextCoord[0] - currentCoord[0], nextCoord[1] - currentCoord[1]) * (180 / Math.PI);
+                var angleToPrev = Math.atan2(currentCoord[0] - prevCoord[0], currentCoord[1] - prevCoord[1]) * (180 / Math.PI);
+                
+                // حساب الفرق بين الزوايا
+                var angleDiff = (angleToNext - angleToPrev + 360) % 360;
+                if (angleDiff > 180) angleDiff -= 360; // التأكد من أن الزاوية في النطاق -180 إلى 180
+
+                console.log("Angle to Next: " + angleToNext); 
+                console.log("Angle to Prev: " + angleToPrev); 
+                console.log("Angle Diff: " + angleDiff); 
+
+                // تحديد اتجاه الانعطاف
+                if (angleDiff > 30) {
+                    displayTurnMessage('left'); // انعطف يسارا
+                    sendTurnSignal('left');
+                } else if (angleDiff < -30) {
+                    displayTurnMessage('right'); // انعطف يمينًا
+                    sendTurnSignal('right');
+                } else {
+                    clearMessages(); // إذا لم يكن هناك انعطاف
+                }
+            }
+        }
+
+        function sendTurnSignal(direction) {
+            var endpoint = direction === 'right' ? '/turn/right' : '/turn/left';
+            fetch(arduinoIp + endpoint)
+                .then(response => response.text())
+                .then(data => {
+                    console.log(data);
+                })
+                .catch(error => {
+                    console.error("خطأ في إرسال الإشارة إلى Arduino:", error);
+                });
+        }
+
+        function displayTurnMessage(direction) {
+            var messageBox = document.getElementById('turnMessages');
+            messageBox.innerHTML = "انعطف إلى " + (direction === 'right' ? "اليمين" : "اليسار");
+        }
+
+        function clearMessages() {
+            var messageBox = document.getElementById('turnMessages');
+            messageBox.innerHTML = "";
+        }
+
+        function displayMessage(message) {
+            var messageBox = document.getElementById('turnMessages');
+            messageBox.innerHTML = message;
+        }
+
+        function startTracking() {
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition(updatePosition, handleError, { enableHighAccuracy: true });
+            } else {
+                alert("الموقع الجغرافي غير مدعوم في هذا المتصفح.");
+            }
+        }
+
+        function updatePosition(position) {
+            var currentCoords = [position.coords.latitude, position.coords.longitude];
+            marker.setLatLng(currentCoords);
+            map.panTo(currentCoords);
+            checkTurn();
+        }
+
+        function handleError(error) {
+            console.log("خطأ في تتبع الموقع: " + error.message);
+        }
+    </script>
+</body>
+</html>
